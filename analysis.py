@@ -4,30 +4,40 @@ import pandas as pd
 import sqlalchemy
 import pymysql
 
+load_dotenv()
+
+user = os.environ.get('user')
+password = os.environ.get('password')
+host = os.environ.get('host')
+port = os.environ.get('port')
+database = os.environ.get('database')
+
+# pymysqlの接続設定
 connection = pymysql.connect(
-                host='127.0.0.1',
-                port=3306,
-                user='root',
-                password='password',
-                db='racedata',
+                host=str(host),
+                port=int(port),
+                user=str(user),
+                password=str(password),
+                db=str(database),
                 cursorclass=pymysql.cursors.DictCursor
               )
 connection.autocommit(False)
 
-load_dotenv()
-
-# connection parameters
+# pandasのmysql接続設定
 user = os.environ.get('user')
 password = os.environ.get('password')
 host = os.environ.get('host')
 port = os.environ.get('port')
 database = os.environ.get('database')
 url = f'mysql+pymysql://{user}:{password}@{host}:{port}/{database}'
-
 engine = sqlalchemy.create_engine(url)
 
-
-def frame_no(place_id, length, days, turf_cond): # 枠順毎の成績取得
+def frame_no(place_id, length, days, turf_cond):
+  """
+  枠順毎の成績取得
+  Param
+  place_id: 
+  """
   days = 'AND ra.days <= 4'
   with connection.cursor() as cursor:
     stmt = (f'''WITH count_tmp AS(
