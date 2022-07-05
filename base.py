@@ -4,11 +4,11 @@ import pandas as pd
 import sqlalchemy
 import pymysql
 import json
-
+from typing import Tuple, List, Set
 
 class Analysis():
   '''分析で使うベースクラス'''
-  def __init__(self, place_id: int, is_turf: bool, length: int):
+  def __init__(self, place_id: int, is_turf: bool, length: int) -> None:
     """
     Parameters
     ----------
@@ -19,17 +19,19 @@ class Analysis():
     length: int 
       レースの距離
     """
-    self.place_id = place_id
-    self.race_type = '芝' if is_turf else 'ダ'
-    self.race_type_en = 'turf' if is_turf else 'dirt'
-    self.length = length
+    place: dict = {1:	'sapporo', 2: 'hakodate', 3: 'fukushima', 4: 'niigata', 5: 'tokyo', 6: 'nakayama', 7: 'chukyo', 8: 'kyoto', 9: 'hanshin', 10: 'kokura'}
+    self.place: str = place[place_id]
+    self.place_id: int = place_id
+    self.race_type: str = '芝' if is_turf else 'ダ'
+    self.race_type_en: str = 'turf' if is_turf else 'dirt'
+    self.length: int = length
 
     load_dotenv()
-    user = os.environ.get('user')
-    password = os.environ.get('password')
-    host = os.environ.get('host')
-    port = os.environ.get('port')
-    database = os.environ.get('database')
+    user: str = os.environ.get('user')
+    password: str = os.environ.get('password')
+    host: str = os.environ.get('host')
+    port: int = os.environ.get('port')
+    database: str = os.environ.get('database')
 
     # pymysqlの接続設定
     self.pool = pymysql.connect(
@@ -43,31 +45,20 @@ class Analysis():
     self.pool.autocommit(False)
 
     # pandasのmysql接続設定
-    user = os.environ.get('user')
-    password = os.environ.get('password')
-    host = os.environ.get('host')
-    port = os.environ.get('port')
-    database = os.environ.get('database')
     url = f'mysql+pymysql://{user}:{password}@{host}:{port}/{database}'
     self.pandas_pool = sqlalchemy.create_engine(url)
   
-  def setTerms(self, turf_cond: str, days: int=3):
-    self.days = days
-    if days == 1: # 開催前半
-      self.days_stmt = 'AND ra.days <= 2'
-    if days == 2:
-      self.days_stmt = 'AND ra.days >= 5'
-    else:
-      self.days_stmt = ''
-    
-    self.turf_cond = turf_cond
+  def setTerms(self, turf_cond: str, days: Tuple[int]) -> None:
+    self.days: Tuple = days
+    self.days_str: str = '-'.join([str(i) for i in days])
+    self.turf_cond: str = turf_cond
     if turf_cond == '良':
-      self.turf_cond_en = 'good'
+      self.turf_cond_en: str = 'good'
     elif turf_cond == '重':
-      self.turf_cond_en = 'bad'
+      self.turf_cond_en: str = 'bad'
 
-  def __base_stmt(self, column: str, column_str: str): #ベースのSQL
-    stmt = f'''
+  def __base_stmt(self, column: str, column_str: str) -> str: #ベースのSQL
+    stmt: str = f'''
         WITH count_tmp AS(
           SELECT
             re.{column} as {column},
@@ -80,7 +71,7 @@ class Analysis():
               AND ra.race_type = '{self.race_type}'
               AND ra.date_and_time > '2010-01-01 09:50:00'
               AND ra.turf_cond = '{self.turf_cond}'
-              {self.days_stmt}
+              AND ra.days IN {self.days}
               -- AND ra.race_rank = 'オープン'
           GROUP BY
             re.{column},
@@ -111,55 +102,60 @@ class Analysis():
       '''
     return stmt
 
-  def frame_no(self): # 枠順別成績
+  def frame_no(self) -> dict: # 枠順別成績
     with self.pool.cursor() as cursor:
-      stmt = self.__base_stmt('frame_no', '馬番')
-      cursor.execute(stmt)
-      return cursor.fetchall()
-
-  def horse_no(self): # 馬番別成績
-    with self.pool.cursor() as cursor:
-      stmt = self.__base_stmt('horse_no', '馬番')
-      cursor.execute(stmt)
-      data = cursor.fetchall()
+      stmt: str = self.__base_stmt('frame_no', '馬番')
+      data: List[dict] = cursor.execute(stmt)
       return {
-        'course_analysis_id': self.__get_course_analysis_id('umaban'),
+        'course_analysis_id': self.__get_analysis_key('umaban'),
+        'data': data,
+        'memo': '枠番別成績'
+      }
+
+  def horse_no(self) -> dict: # 馬番別成績
+    with self.pool.cursor() as cursor:
+      stmt: str = self.__base_stmt('horse_no', '馬番')
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      return {
+        'course_analysis_id': self.__get_analysis_key('umaban'),
         'data': data,
         'memo': '馬番別成績'
       }
   
-  def __get_course_analysis_id(self, key :str): # course_analysis_idを生成する
-    course_analysis_id = f'''{key}-{self.place_id}-{self.race_type_en}-{self.length}-{self.turf_cond_en}-{self.days}'''
-    return course_analysis_id
-
-  def insertCourseAnalysis(self, course_analysis_id, data, memo):
-    corse_analysis_columns = [
-      'course_analysis_id', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'data'
+  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str) -> bool:
+    corse_analysis_columns: List = [
+      'analysis_key', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'days', 'data'
     ]
 
-    ## カラムの個数だけパーサー(%s)を用意する
-    def create_parser(count):
-      parser = ''
-      for i in range(count):
-        parser += '%s' if (i + 1) == count else '%s, '
-      return parser
-
     data_json = json.dumps(data)
-    values = (
-      course_analysis_id, self.place_id, self.length, memo, self.turf_cond, self.race_type, data_json
+    values: Tuple = (
+      analysis_key, self.place_id, self.length, memo, self.turf_cond, self.race_type, self.days_str ,data_json
     )
 
     try:
       with self.pool.cursor() as cursor:
-        columns = ",".join(corse_analysis_columns)
-        parser = create_parser(len(corse_analysis_columns))
-        # stmt = (f'''INSERT INTO course_analysis ({columns}) VALUES ({parser})''', values)
-        stmt = (f'''INSERT INTO course_analysis ({columns}) VALUES ({values})''')
-        print(stmt)
-        cursor.execute(stmt)
-        cursor.commit()
+        print(analysis_key)
+        print(memo)
+        print(data)
+        columns: str = ",".join(corse_analysis_columns)
+        parser: str = self.__create_parser(len(corse_analysis_columns))
+        stmt: Tuple = (f'''INSERT INTO analysis ({columns}) VALUES ({parser})''', values)
+        cursor.execute(*stmt)
+        self.pool.commit()
+        print('インサート成功')
         return True
     except Exception as e:
       print(e)
-      # cursor.rollback()
+      self.pool.rollback()
       return False
+
+  def __get_analysis_key(self, key :str) -> str: # analysis_keyを生成する
+    analysis_key: str= f'''{key}-{self.place}-{self.race_type_en}-{self.length}-{self.turf_cond_en}-{self.days_str}'''
+    return analysis_key
+
+  def __create_parser(self, count) -> str: ## カラムの個数だけパーサー(%s)を用意する
+    parser: str = ''
+    for i in range(count):
+      parser += '%s' if (i + 1) == count else '%s, '
+    return parser
