@@ -57,7 +57,7 @@ class Analysis():
     elif turf_cond == '重':
       self.turf_cond_en: str = 'bad'
 
-  def __base_stmt(self, column: str, column_str: str) -> str: #ベースのSQL
+  def __base_stmt(self, column: str, column_ja: str) -> str: #ベースのSQL
     stmt: str = f'''
         WITH count_tmp AS(
           SELECT
@@ -77,28 +77,44 @@ class Analysis():
             re.{column},
             re.arrival_order
           ORDER BY re.{column}
-        )
-        SELECT
-            {column} as "{column_str}",
-            no1 as '1着',
-            no2 as "2着",
-            no3 as '3着',
-            no4 as '4着以下',
-            concat( FORMAT(no1 / (no1 + no2 + no3 + no4) * 100, 0), "％") as "勝率",
-            concat( FORMAT((no1 + no2 ) / (no1 + no2 + no3 + no4)  * 100, 0), "％") as "連対率",
-            concat( FORMAT( (no1 + no2 + no3) / (no1 + no2 + no3 + no4)  * 100, 0), "％")as "3着以内"
-        FROM(
+        ),
+        arrival_tmp AS (
+          SELECT
+              {column},
+              MAX(CASE arrival_order WHEN 1 THEN re_count ELSE 0 END) as "no1",
+              MAX(CASE arrival_order WHEN 2 THEN re_count ELSE 0 END) as "no2",
+              MAX(CASE arrival_order WHEN 3 THEN re_count ELSE 0 END) as "no3",
+              MAX(CASE WHEN arrival_order > 3 THEN re_count ELSE 0 END) as "no4"
+          FROM
+              count_tmp
+          GROUP BY
+              {column}
+          ),
+          rate_tmp AS (
             SELECT
-                {column},
-                MAX(CASE arrival_order WHEN 1 THEN re_count ELSE 0 END) as "no1",
-                MAX(CASE arrival_order WHEN 2 THEN re_count ELSE 0 END) as "no2",
-                MAX(CASE arrival_order WHEN 3 THEN re_count ELSE 0 END) as "no3",
-                MAX(CASE WHEN arrival_order > 3 THEN re_count ELSE 0 END) as "no4"
+                *,
+                no1 / (no1 + no2 + no3 + no4) * 100 as win_rate,
+                (no1 + no2 ) / (no1 + no2 + no3 + no4)  * 100 as rentai_rate,
+                (no1 + no2 + no3) / (no1 + no2 + no3 + no4)  * 100 as fukusho_rate
             FROM
-                count_tmp
-            GROUP BY
-                {column}
-        ) AS arrival_order
+              arrival_tmp
+            ORDER BY
+              {column}
+          )
+          SELECT 
+              {column} as {column_ja},
+              no1 as '1着',
+              no2 as '2着',
+              no3 as '3着',
+              no4 as '4着以下',
+              concat( FORMAT(win_rate, 1), '%') as '勝率',
+              concat( FORMAT(rentai_rate, 1), '%') as '連対率',
+              concat( FORMAT(fukusho_rate, 1), '%') as '複勝率',
+              RANK() OVER(ORDER BY win_rate DESC) AS win_rate_ranking,
+              RANK() OVER(ORDER BY rentai_rate DESC) AS rentai_rate_ranking,
+              RANK() OVER(ORDER BY fukusho_rate DESC) AS fukusho_rate_ranking
+          FROM
+            rate_tmp
       '''
     return stmt
 
@@ -120,17 +136,23 @@ class Analysis():
       return {
         'course_analysis_id': self.__get_analysis_key('umaban'),
         'data': data,
-        'memo': '馬番別成績'
+        'memo': '馬番別成績',
+        'column_ordering': self.__create_column_ording('馬番')
       }
   
-  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str) -> bool:
+  def processingData(self, data) -> List[List]:
+    data = [self.__proccessing_dict_value(d) for d in data]
+    data = [self.__rank_coloring(d) for d in data]
+    return data
+
+  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str, column_ordering: str) -> bool:
     corse_analysis_columns: List = [
-      'analysis_key', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'days', 'data'
+      'analysis_key', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'days', 'data', 'column_ordering'
     ]
 
     data_json = json.dumps(data)
     values: Tuple = (
-      analysis_key, self.place_id, self.length, memo, self.turf_cond, self.race_type, self.days_str ,data_json
+      analysis_key, self.place_id, self.length, memo, self.turf_cond, self.race_type, self.days_str ,data_json, column_ordering
     )
 
     try:
@@ -159,3 +181,31 @@ class Analysis():
     for i in range(count):
       parser += '%s' if (i + 1) == count else '%s, '
     return parser
+
+  def __proccessing_dict_value(self, data) -> dict:
+    for k, v in data.items():
+      data[k] = {
+        'value': v,
+        'schema': None
+      }
+    return data
+  
+  def __rank_coloring(self, data) -> dict:
+    def target_column_rank(data: dict, column: str, column_ja: str):
+      if data[column]['value'] == 1:
+        data[column_ja]['schema'] = 'yellow'
+      elif data[column]['value'] == 2:
+        data[column_ja]['schema'] = 'blue'
+      elif data[column]['value'] == 3:
+        data[column_ja]['schema'] = 'red'
+      
+      del data[column]
+      return data
+
+    data = target_column_rank(data, 'win_rate_ranking', '勝率')
+    data = target_column_rank(data, 'rentai_rate_ranking', '連対率')
+    data = target_column_rank(data, 'fukusho_rate_ranking', '複勝率')
+    return data
+  
+  def __create_column_ording(self, column_ja: str) -> str:
+    return f'{column_ja},1着,2着,3着,4着以下,勝率,連対率,複勝率'
