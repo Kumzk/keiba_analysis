@@ -40,11 +40,14 @@ days: Tuple = days_pattern[2]
 analysis = Analysis(place_id, is_turf, length)
 # 条件追加
 analysis.setTerms(cond, days)
-horse_no: dict = analysis.horse_no()
-# frame_no: dict = analysis.frame_no()
-horse_no_data: dict = analysis.processingData(horse_no['data'])
+# horse_no: dict = analysis.horse_no()
+# print(horse_no)
+frame_no: dict = analysis.frame_no()
+insert: bool = analysis.insertCourseAnalysis(frame_no['course_analysis_id'], frame_no['data'], frame_no['memo'])
+
+# horse_no_data: dict = analysis.processingData(horse_no['data'])
 # print(json.dumps(horse_no_data,indent=2, ensure_ascii=False))
-insert: bool = analysis.insertCourseAnalysis(horse_no['course_analysis_id'], horse_no_data, horse_no['memo'], horse_no['column_ordering'])
+# insert: bool = analysis.insertCourseAnalysis(horse_no['course_analysis_id'], horse_no['data'], horse_no['memo'])
 # insert: bool = analysis.insertCourseAnalysis(horse_no['course_analysis_id'], horse_no['data'], horse_no['memo'])
 # print(insert)
 # print(json.dumps(horse_no))

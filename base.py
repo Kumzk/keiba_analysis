@@ -57,7 +57,7 @@ class Analysis():
     elif turf_cond == '重':
       self.turf_cond_en: str = 'bad'
 
-  def __base_stmt(self, column: str, column_ja: str) -> str: #ベースのSQL
+  def __base_stmt(self, column: str, column_ja: str, where: str) -> str: #ベースのSQL
     stmt: str = f'''
         WITH count_tmp AS(
           SELECT
@@ -66,13 +66,7 @@ class Analysis():
             count(re.seq) as re_count
           FROM race ra
           INNER JOIN result re ON ra.race_id = re.race_id
-          WHERE ra.place_id = {self.place_id}
-              AND ra.length = {self.length}
-              AND ra.race_type = '{self.race_type}'
-              AND ra.date_and_time > '2010-01-01 09:50:00'
-              AND ra.turf_cond = '{self.turf_cond}'
-              AND ra.days IN {self.days}
-              -- AND ra.race_rank = 'オープン'
+          WHERE {where}
           GROUP BY
             re.{column},
             re.arrival_order
@@ -100,9 +94,56 @@ class Analysis():
               arrival_tmp
             ORDER BY
               {column}
-          )
+          ),
+            winning_percentage AS (
+            SELECT
+                re.{column} as {column},
+                concat( FORMAT(SUM(refund.refund) / (count(*) * 100) * 100, 1), '%') as 'win_recovery_rate',
+                SUM(refund.refund) / (count(*) * 100) * 100 as 'win_recovery_rate_num'
+            FROM
+                race ra
+                INNER JOIN result re
+                    ON ra.race_id = re.race_id
+                LEFT OUTER JOIN refund
+                    ON ra.race_id = refund.race_id
+                    AND re.horse_no = refund.horse_no
+                    AND refund.ticket_type = 1
+            WHERE {where}
+            GROUP BY
+                re.{column}
+            ORDER BY re.frame_no
+        ), d_win_recovery_rate AS (
+          SELECT
+              re.frame_no as {column}_1,
+              concat( FORMAT(SUM(refund.refund) / (count(*) * 100) * 100, 1), '%') as 'd_win_recovery_rate',
+              SUM(refund.refund) / (count(*) * 100) * 100 as 'd_win_recovery_rate_num'
+          FROM
+              race ra
+              INNER JOIN result re
+                  ON ra.race_id = re.race_id
+              LEFT OUTER JOIN refund
+                  ON ra.race_id = refund.race_id
+                  AND re.horse_no = refund.horse_no
+                  AND refund.ticket_type = 2
+          WHERE
+              {where}
+          GROUP BY
+              re.{column}
+          ORDER BY re.{column}
+        ), recover_tmp AS (
+          SELECT
+            winning_percentage.{column},
+            win_recovery_rate,
+            d_win_recovery_rate,
+            CASE WHEN winning_percentage.win_recovery_rate_num >= 100 THEN  1 ELSE 0 END AS 'win_recovery_100_over',
+            CASE WHEN d_win_recovery_rate.d_win_recovery_rate_num >= 100 THEN  1 ELSE 0 END AS 'd_win_recovery_100_over'
+          FROM 
+              winning_percentage
+          INNER JOIN d_win_recovery_rate ON 
+              winning_percentage.frame_no = d_win_recovery_rate.{column}_1
+        )
           SELECT 
-              {column} as {column_ja},
+              rate_tmp.{column} as {column_ja},
               no1 as '1着',
               no2 as '2着',
               no3 as '3着',
@@ -112,32 +153,58 @@ class Analysis():
               concat( FORMAT(fukusho_rate, 1), '%') as '複勝率',
               RANK() OVER(ORDER BY win_rate DESC) AS win_rate_ranking,
               RANK() OVER(ORDER BY rentai_rate DESC) AS rentai_rate_ranking,
-              RANK() OVER(ORDER BY fukusho_rate DESC) AS fukusho_rate_ranking
+              RANK() OVER(ORDER BY fukusho_rate DESC) AS fukusho_rate_ranking,
+              win_recovery_rate as '単勝回収率',
+              d_win_recovery_rate as '複勝回収率',
+              win_recovery_100_over,
+              d_win_recovery_100_over
           FROM
             rate_tmp
+          INNER JOIN recover_tmp ON rate_tmp.{column} = recover_tmp.{column}
+          ORDER BY rate_tmp.{column}
       '''
     return stmt
 
+  def __create_where(self):
+    return f'''
+      ra.place_id = {self.place_id}
+      AND ra.length = {self.length}
+      AND ra.race_type = '{self.race_type}'
+      AND ra.date_and_time > '2010-01-01 09:50:00'
+      AND ra.turf_cond = '{self.turf_cond}'
+      AND ra.days IN {self.days}
+      -- AND ra.race_rank = 'オープン'
+      '''
+
   def frame_no(self) -> dict: # 枠順別成績
     with self.pool.cursor() as cursor:
-      stmt: str = self.__base_stmt('frame_no', '馬番')
-      data: List[dict] = cursor.execute(stmt)
+      stmt: str = self.__base_stmt('frame_no', '枠番', self.__create_where())
+      print(stmt)
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
       return {
-        'course_analysis_id': self.__get_analysis_key('umaban'),
-        'data': data,
+        'course_analysis_id': self.__get_analysis_key('wakuban'),
+        'data': {
+          'table_header': self.__create_column_ording('枠番'),
+          'data': data,
+        },
         'memo': '枠番別成績'
       }
 
   def horse_no(self) -> dict: # 馬番別成績
     with self.pool.cursor() as cursor:
-      stmt: str = self.__base_stmt('horse_no', '馬番')
+      stmt: str = self.__base_stmt('horse_no', '馬番', self.__create_where())
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
       return {
         'course_analysis_id': self.__get_analysis_key('umaban'),
-        'data': data,
+        'data': {
+          'table_header': self.__create_column_ording('馬番'),
+          'data': data,
+        },
         'memo': '馬番別成績',
-        'column_ordering': self.__create_column_ording('馬番')
       }
   
   def processingData(self, data) -> List[List]:
@@ -145,14 +212,14 @@ class Analysis():
     data = [self.__rank_coloring(d) for d in data]
     return data
 
-  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str, column_ordering: str) -> bool:
+  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str) -> bool:
     corse_analysis_columns: List = [
-      'analysis_key', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'days', 'data', 'column_ordering'
+      'analysis_key', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'days', 'data'
     ]
 
     data_json = json.dumps(data)
     values: Tuple = (
-      analysis_key, self.place_id, self.length, memo, self.turf_cond, self.race_type, self.days_str ,data_json, column_ordering
+      analysis_key, self.place_id, self.length, memo, self.turf_cond, self.race_type, self.days_str ,data_json
     )
 
     try:
@@ -205,7 +272,9 @@ class Analysis():
     data = target_column_rank(data, 'win_rate_ranking', '勝率')
     data = target_column_rank(data, 'rentai_rate_ranking', '連対率')
     data = target_column_rank(data, 'fukusho_rate_ranking', '複勝率')
+    data = target_column_rank(data, 'win_recovery_100_over', '単勝回収率')
+    data = target_column_rank(data, 'd_win_recovery_100_over', '複勝回収率')
     return data
   
   def __create_column_ording(self, column_ja: str) -> str:
-    return f'{column_ja},1着,2着,3着,4着以下,勝率,連対率,複勝率'
+    return [column_ja,'1着','2着','3着','4着以下','勝率','連対率','複勝率','単勝回収率','複勝回収率']
