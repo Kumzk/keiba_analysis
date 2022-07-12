@@ -5,6 +5,8 @@ import sqlalchemy
 import pymysql
 import json
 from typing import Tuple, List, Set
+from IPython.display import display
+
 
 class Analysis():
   '''分析で使うベースクラス'''
@@ -47,6 +49,8 @@ class Analysis():
     # pandasのmysql接続設定
     url = f'mysql+pymysql://{user}:{password}@{host}:{port}/{database}'
     self.pandas_pool = sqlalchemy.create_engine(url)
+
+    self.drop_col = ['win_rate_ranking', 'rentai_rate_ranking', 'fukusho_rate_ranking', 'win_recovery_100_over', 'd_win_recovery_100_over']
   
   def setTerms(self, turf_cond: str, days: Tuple[int]) -> None:
     self.days: Tuple = days
@@ -111,10 +115,10 @@ class Analysis():
             WHERE {where}
             GROUP BY
                 re.{column}
-            ORDER BY re.frame_no
+            ORDER BY re.{column}
         ), d_win_recovery_rate AS (
           SELECT
-              re.frame_no as {column}_1,
+              re.{column} as {column}_1,
               concat( FORMAT(SUM(refund.refund) / (count(*) * 100) * 100, 1), '%') as 'd_win_recovery_rate',
               SUM(refund.refund) / (count(*) * 100) * 100 as 'd_win_recovery_rate_num'
           FROM
@@ -140,7 +144,7 @@ class Analysis():
           FROM 
               winning_percentage
           INNER JOIN d_win_recovery_rate ON 
-              winning_percentage.frame_no = d_win_recovery_rate.{column}_1
+              winning_percentage.{column} = d_win_recovery_rate.{column}_1
         )
           SELECT 
               rate_tmp.{column} as {column_ja},
@@ -165,7 +169,7 @@ class Analysis():
       '''
     return stmt
 
-  def __create_where(self):
+  def __create_where(self) -> str:
     return f'''
       ra.place_id = {self.place_id}
       AND ra.length = {self.length}
@@ -176,20 +180,32 @@ class Analysis():
       -- AND ra.race_rank = 'オープン'
       '''
 
+  def count_race(self):
+    stmt = f'''
+      SELECT count(*) as target_race
+      FROM race ra
+      WHERE {self.__create_where()}
+    '''
+    with self.pool.cursor() as cursor:
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+    return data[0]['target_race']
+  
   def frame_no(self) -> dict: # 枠順別成績
     with self.pool.cursor() as cursor:
       stmt: str = self.__base_stmt('frame_no', '枠番', self.__create_where())
-      print(stmt)
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
       return {
         'course_analysis_id': self.__get_analysis_key('wakuban'),
         'data': {
           'table_header': self.__create_column_ording('枠番'),
           'data': data,
         },
-        'memo': '枠番別成績'
+        'memo': '枠番別成績',
+        'df': df.drop(self.drop_col, axis=1)
       }
 
   def horse_no(self) -> dict: # 馬番別成績
@@ -198,6 +214,7 @@ class Analysis():
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
       return {
         'course_analysis_id': self.__get_analysis_key('umaban'),
         'data': {
@@ -205,6 +222,7 @@ class Analysis():
           'data': data,
         },
         'memo': '馬番別成績',
+        'df': df.drop(self.drop_col, axis=1)
       }
   
   def processingData(self, data) -> List[List]:
@@ -225,8 +243,8 @@ class Analysis():
     try:
       with self.pool.cursor() as cursor:
         print(analysis_key)
-        print(memo)
-        print(data)
+        # print(memo)
+        # print(data)
         columns: str = ",".join(corse_analysis_columns)
         parser: str = self.__create_parser(len(corse_analysis_columns))
         stmt: Tuple = (f'''INSERT INTO analysis ({columns}) VALUES ({parser})''', values)
