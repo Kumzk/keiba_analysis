@@ -52,7 +52,7 @@ class Analysis():
 
     self.drop_col = ['win_rate_ranking', 'rentai_rate_ranking', 'fukusho_rate_ranking', 'win_recovery_100_over', 'd_win_recovery_100_over']
   
-  def setTerms(self, turf_cond: str, days: Tuple[int]) -> None:
+  def setTerms(self, turf_cond: str, days: Tuple[int]) -> None: # 検索条件をセットする
     self.days: Tuple = days
     self.days_str: str = '-'.join([str(i) for i in days])
     self.turf_cond: str = turf_cond
@@ -61,7 +61,7 @@ class Analysis():
     elif turf_cond == '重':
       self.turf_cond_en: str = 'bad'
 
-  def __create_where(self) -> str:
+  def __create_where(self) -> str: # WHERE句の条件の文字列を返す
     return f'''
       ra.place_id = {self.place_id}
       AND ra.length = {self.length}
@@ -72,7 +72,7 @@ class Analysis():
       -- AND ra.race_rank = 'オープン'
       '''
 
-  def count_race(self):
+  def count_race(self): # 対象レース数をカウント
     stmt = f'''
       SELECT count(*) as target_race
       FROM race ra
@@ -134,7 +134,7 @@ class Analysis():
         'df': df.drop(self.drop_col, axis=1)
       }
   
-  def horse_weight(self) -> dict:
+  def horse_weight(self) -> dict:　# 馬体重別成績
     with self.pool.cursor() as cursor:
       stmt: str = Query.base_stmt('horse_weight', '馬体重', self.__create_where())
       cursor.execute(stmt)
@@ -151,12 +151,12 @@ class Analysis():
         'df': df.drop(self.drop_col, axis=1)
       }
       
-  def processingData(self, data) -> List[List]:
+  def processingData(self, data) -> List[List]: # クエリの結果を加工
     data = [self.__proccessing_dict_value(d) for d in data]
     data = [self.__rank_coloring(d) for d in data]
     return data
 
-  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str) -> bool:
+  def insertCourseAnalysis(self, analysis_key: str, data: dict, memo: str) -> bool: # 分析結果をDBにインサート
     corse_analysis_columns: List = [
       'analysis_key', 'place_id', 'length', 'memo', 'turf_cond', 'race_type', 'days', 'data'
     ]
@@ -193,7 +193,7 @@ class Analysis():
       parser += '%s' if (i + 1) == count else '%s, '
     return parser
 
-  def __proccessing_dict_value(self, data) -> dict:
+  def __proccessing_dict_value(self, data) -> dict: # valueをフォーマット
     for k, v in data.items():
       data[k] = {
         'value': v,
@@ -201,7 +201,7 @@ class Analysis():
       }
     return data
   
-  def __rank_coloring(self, data) -> dict:
+  def __rank_coloring(self, data) -> dict: # ランキング順に色付けする
     def target_column_rank(data: dict, column: str, column_ja: str):
       if data[column]['value'] == 1:
         data[column_ja]['schema'] = 'yellow'
@@ -220,5 +220,5 @@ class Analysis():
     data = target_column_rank(data, 'd_win_recovery_100_over', '複回値')
     return data
   
-  def __create_column_ording(self, column_ja: str) -> str:
+  def __create_column_ording(self, column_ja: str) -> str: # 表のカラムの表示順を管理
     return [column_ja,'着度数','勝率','連対率','複勝率','単回値','複回値']
