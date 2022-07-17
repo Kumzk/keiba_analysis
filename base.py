@@ -4,13 +4,13 @@ import pandas as pd
 import sqlalchemy
 import pymysql
 import json
-from typing import Tuple, List, Set
+from typing import Tuple, List, Set, Union
 from IPython.display import display
 from query import Query
 
 class Analysis():
   '''分析で使うベースクラス'''
-  def __init__(self, place_id: int, is_turf: bool, length: int) -> None:
+  def __init__(self, place_id: int, is_turf: bool, length: int, grade_race: Union[str,None]) -> None:
     """
     Parameters
     ----------
@@ -24,6 +24,7 @@ class Analysis():
     place: dict = {1:	'sapporo', 2: 'hakodate', 3: 'fukushima', 4: 'niigata', 5: 'tokyo', 6: 'nakayama', 7: 'chukyo', 8: 'kyoto', 9: 'hanshin', 10: 'kokura'}
     self.place: str = place[place_id]
     self.place_id: int = place_id
+    self.grade_race: Union[str,None] = grade_race
     self.race_type: str = '芝' if is_turf else 'ダ'
     self.race_type_en: str = 'turf' if is_turf else 'dirt'
     self.length: int = length
@@ -62,17 +63,24 @@ class Analysis():
       self.turf_cond_en: str = 'bad'
 
   def __create_where(self) -> str: # WHERE句の条件の文字列を返す
-    return f'''
-      ra.place_id = {self.place_id}
-      AND ra.length = {self.length}
-      AND ra.race_type = '{self.race_type}'
-      AND ra.date_and_time > '2010-01-01 09:50:00'
-      AND ra.turf_cond = '{self.turf_cond}'
-      AND ra.days IN {self.days}
-      -- AND ra.race_rank = 'オープン'
+    if self.grade_race is not None:
+      stmt =  f'''
+      ra.name LIKE '%{self.grade_race}%'
+      AND ra.date_and_time > '2012-01-01 09:50:00'
       '''
+    else:
+      stmt = f'''
+        ra.place_id = {self.place_id}
+        AND ra.length = {self.length}
+        AND ra.race_type = '{self.race_type}'
+        AND ra.date_and_time > '2010-01-01 09:50:00'
+        AND ra.turf_cond = '{self.turf_cond}'
+        AND ra.days IN {self.days}
+        -- AND ra.race_rank = 'オープン'
+        '''
+    return  stmt
 
-  def count_race(self): # 対象レース数をカウント
+  def count_race(self) -> str: # 対象レース数をカウント
     stmt = f'''
       SELECT count(*) as target_race
       FROM race ra
@@ -82,6 +90,44 @@ class Analysis():
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
     return data[0]['target_race']
+  
+  def count_horse(self) -> str: # 対象レース数をカウント
+    stmt = f'''
+      SELECT count(*) as target_race
+      FROM race ra
+      INNER JOIN result re ON ra.race_id = re.race_id
+      WHERE {self.__create_where()}
+    '''
+    with self.pool.cursor() as cursor:
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+    return data[0]['target_race']
+
+  def grade_race_course(self):
+    if self.grade_race is None:
+      course =  ''
+    else:
+      stmt = f'''
+        SELECT 
+          mp.name,
+          ra.length,
+          ra.race_type,
+          ra.circling,
+          ra.terms
+          FROM race ra
+          INNER JOIN master_place mp ON ra.place_id = mp.id
+          WHERE
+          ra.name LIKE '%{self.grade_race}%'
+          ORDER BY ra.date_and_time DESC
+          LIMIT 1
+      '''
+      with self.pool.cursor() as cursor:
+        cursor.execute(stmt)
+        data: List[dict] = cursor.fetchall()
+        data = data[0]
+
+      course = f'''開催場所: {data['name']}競馬場\n距離: {data['length']}\nコース: {data['race_type']}\n周り: {data['circling']}\n条件: {data['terms']}\n'''
+    return course
   
   def frame_no(self) -> dict: # 枠順別成績
     with self.pool.cursor() as cursor:
@@ -134,9 +180,9 @@ class Analysis():
         'df': df.drop(self.drop_col, axis=1)
       }
   
-  def horse_weight(self) -> dict:　# 馬体重別成績
+  def horse_weight(self) -> dict: # 馬体重別成績
     with self.pool.cursor() as cursor:
-      stmt: str = Query.base_stmt('horse_weight', '馬体重', self.__create_where())
+      stmt: str = Query.horse_weight_stmt(self.__create_where())
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
