@@ -130,8 +130,16 @@ class Analysis():
     return course
   
   def frame_no(self) -> dict: # 枠順別成績
+    column = 'frame_no'
+    column_ja = '枠番'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+
     with self.pool.cursor() as cursor:
-      stmt: str = Query.base_stmt('frame_no', '枠番', self.__create_where())
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
@@ -147,8 +155,16 @@ class Analysis():
       }
 
   def horse_no(self) -> dict: # 馬番別成績
+    column = 'horse_no'
+    column_ja = '馬番'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+
     with self.pool.cursor() as cursor:
-      stmt: str = Query.base_stmt('horse_no', '馬番', self.__create_where())
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
@@ -164,8 +180,17 @@ class Analysis():
       }
 
   def popularity_order(self) -> dict: # 人気順別成績
+    column = 'popularity_order'
+    column_ja = '人気順'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+    
     with self.pool.cursor() as cursor:
-      stmt: str = Query.base_stmt('popularity_order', '人気順', self.__create_where())
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      print(stmt)
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
@@ -179,10 +204,95 @@ class Analysis():
         'memo': '人気順成績',
         'df': df.drop(self.drop_col, axis=1)
       }
+
+  def leg_type(self) -> dict:
+    column = '4c'
+    column_ja = '脚質'
+    case_re_column = f'''
+      CASE
+          WHEN re.4c = 1 THEN 1 
+          WHEN re.4c between 2 AND 4 THEN 2
+          WHEN re.4c between 5 AND 8 THEN 3
+          WHEN re.4c >= 9 THEN 4
+      END
+    '''
+    case_column = f'''
+      CASE
+          WHEN 4c = 1 THEN 1 
+          WHEN 4c between 2 AND 4 THEN 2
+          WHEN 4c between 5 AND 8 THEN 3
+          WHEN 4c >= 9 THEN 4
+      END
+    '''
+    case_column_ja = f'''
+      CASE rate_tmp.4c
+              WHEN 1 THEN '逃げ'
+              WHEN 2 THEN '先行'
+              WHEN 3 THEN '差し'
+              WHEN 4 THEN '追込'
+      END
+    '''
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('kyakusitu'),
+        'data': {
+          'table_header': self.__create_column_ording('脚質'),
+          'data': data,
+        },
+        'memo': '脚質別成績',
+        'df': df.drop(self.drop_col, axis=1)
+      }
+
   
   def horse_weight(self) -> dict: # 馬体重別成績
+    column = 'horse_weight'
+    column_ja = '馬体重'
+    case_re_column = f'''
+      CASE
+        WHEN re.horse_weight < 420 THEN  1
+        WHEN re.horse_weight between 420 AND 439 THEN 2
+        WHEN re.horse_weight between 440 AND 459 THEN 3
+        WHEN re.horse_weight between 460 AND 479 THEN 4
+        WHEN re.horse_weight between 480 AND 499 THEN 5
+        WHEN re.horse_weight between 500 AND 519 THEN 6
+        WHEN re.horse_weight >= 520 THEN 7
+      END
+    '''
+
+    case_column = f'''
+      CASE
+        WHEN horse_weight < 420 THEN  1
+        WHEN horse_weight between 420 AND 439 THEN 2
+        WHEN horse_weight between 440 AND 459 THEN 3
+        WHEN horse_weight between 460 AND 479 THEN 4
+        WHEN horse_weight between 480 AND 499 THEN 5
+        WHEN horse_weight between 500 AND 519 THEN 6
+        WHEN horse_weight >= 520 THEN 7
+      END
+    '''
+
+    case_column_ja = f'''
+      CASE rate_tmp.horse_weight
+        WHEN 1 THEN '~ 419kg'
+        WHEN 2 THEN '420kg ~ 439kg'
+        WHEN 3 THEN '440kg ~459kg'
+        WHEN 4 THEN '460kg ~ 479kg'
+        WHEN 5 THEN '480kg ~ 499kg'
+        WHEN 6 THEN '500kg ~ 519kg'
+        WHEN 7 THEN '520kg ~ '
+      END
+    '''
     with self.pool.cursor() as cursor:
-      stmt: str = Query.horse_weight_stmt(self.__create_where())
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
