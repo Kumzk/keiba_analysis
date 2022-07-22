@@ -306,7 +306,97 @@ class Analysis():
         'memo': '馬体重別成績',
         'df': df.drop(self.drop_col, axis=1)
       }
-      
+
+  def seconds_3f(self) -> dict: # 上がり3F
+    column = 'seconds_3f'
+    column_ja = '3Fタイム'
+    case_re_column = f'''
+      CASE
+        WHEN re.seconds_3f between 31.5 AND 31.9 THEN  1
+        WHEN re.seconds_3f between 32.0 AND 32.4 THEN  2
+        WHEN re.seconds_3f between 32.5 AND 32.9 THEN  3
+        WHEN re.seconds_3f between 33.0 AND 33.4 THEN 4
+        WHEN re.seconds_3f between 33.5 AND 33.9 THEN 5
+        WHEN re.seconds_3f between 34.0 AND 34.4 THEN 6
+        WHEN re.seconds_3f between 34.5 AND 34.9 THEN 7
+        WHEN re.seconds_3f between 35.0 AND 35.4 THEN 8
+        WHEN re.seconds_3f between 35.5 AND 35.9 THEN 9
+        WHEN re.seconds_3f >= 36.0 THEN 10
+      END
+    '''
+
+    case_column = f'''
+      CASE
+        WHEN seconds_3f between 31.5 AND 31.9 THEN  1
+        WHEN seconds_3f between 32.0 AND 32.4 THEN  2
+        WHEN seconds_3f between 32.5 AND 32.9 THEN  3
+        WHEN seconds_3f between 33.0 AND 33.4 THEN 4
+        WHEN seconds_3f between 33.5 AND 33.9 THEN 5
+        WHEN seconds_3f between 34.0 AND 34.4 THEN 6
+        WHEN seconds_3f between 34.5 AND 34.9 THEN 7
+        WHEN seconds_3f between 35.0 AND 35.4 THEN 8
+        WHEN seconds_3f between 35.5 AND 35.9 THEN 9
+        WHEN seconds_3f >= 36.0 THEN 10
+      END
+    '''
+
+    case_column_ja = f'''
+      CASE rate_tmp.seconds_3f
+        WHEN 1 THEN '31.5 ~ 31.9'
+        WHEN 2 THEN '32.0 ~ 32.4'
+        WHEN 3 THEN '32.5 ~ 32.9'
+        WHEN 4 THEN '33.0 ~ 33.4'
+        WHEN 5 THEN '33.5 ~ 33.9'
+        WHEN 6 THEN '34.0 ~  34.4'
+        WHEN 7 THEN '34.5 ~ 34.9'
+        WHEN 8 THEN '35.0 ~ 35.4'
+        WHEN 9 THEN '35.5 ~ 35.9'
+        WHEN 10 THEN '36.0 ~'
+      END
+    '''
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('last3f'),
+        'data': {
+          'table_header': self.__create_column_ording('3Fタイム'),
+          'data': data,
+        },
+        'memo': '上がり3Fタイム別成績',
+        'df': df.drop(self.drop_col, axis=1)
+      }
+
+  def seconds_3f_rank(self) -> dict: # 人気順別成績
+    column = 'seconds_3f'
+    column_ja = '3F速さ順位'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+    
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_stmt_rank(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      print(stmt)
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('3f_rank'),
+        'data': {
+          'table_header': self.__create_column_ording('3F速さ順位'),
+          'data': data,
+        },
+        'memo': '3F速さ順位',
+        'df': df.drop(self.drop_col, axis=1)
+      }
   def processingData(self, data) -> List[List]: # クエリの結果を加工
     data = [self.__proccessing_dict_value(d) for d in data]
     data = [self.__rank_coloring(d) for d in data]
