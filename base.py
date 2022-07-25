@@ -52,6 +52,7 @@ class Analysis():
     self.pandas_pool = sqlalchemy.create_engine(url)
 
     self.drop_col = ['win_rate_ranking', 'rentai_rate_ranking', 'fukusho_rate_ranking', 'win_recovery_100_over', 'd_win_recovery_100_over']
+    self.drop_col2 = ['win_rate_ranking', 'rentai_rate_ranking', 'fukusho_rate_ranking', 'win_recovery_100_over', 'd_win_recovery_100_over', 'total_count']
   
   def setTerms(self, turf_cond: str, days: Tuple[int]) -> None: # 検索条件をセットする
     self.days: Tuple = days
@@ -61,6 +62,8 @@ class Analysis():
       self.turf_cond_en: str = 'good'
     elif turf_cond == '重':
       self.turf_cond_en: str = 'bad'
+    elif turf_cond == '稍重':
+      self.turf_cond_en: str = 'litle_bad'
 
   def __create_where(self) -> str: # WHERE句の条件の文字列を返す
     if self.grade_race is not None:
@@ -76,6 +79,9 @@ class Analysis():
         AND ra.date_and_time > '2010-01-01 09:50:00'
         AND ra.turf_cond = '{self.turf_cond}'
         AND ra.days IN {self.days}
+        -- AND date_format(date_and_time,'%m') IN (7,8)
+        -- AND ra.name LIKE '%1勝%'
+        -- AND ra.terms = 'ハンデ'
         -- AND ra.race_rank = 'オープン'
         '''
     return  stmt
@@ -190,7 +196,6 @@ class Analysis():
       stmt: str = Query.base_stmt(
         column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
       )
-      print(stmt)
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
@@ -205,23 +210,48 @@ class Analysis():
         'df': df.drop(self.drop_col, axis=1)
       }
 
+  def horse_sex(self) -> dict: # 人気順別成績
+    column = 'horse_sex'
+    column_ja = '性別'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+    
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('seibetu'),
+        'data': {
+          'table_header': self.__create_column_ording('性別'),
+          'data': data,
+        },
+        'memo': '性別別成績',
+        'df': df.drop(self.drop_col, axis=1)
+      }
+
   def leg_type(self) -> dict:
     column = '4c'
     column_ja = '脚質'
     case_re_column = f'''
       CASE
           WHEN re.4c = 1 THEN 1 
-          WHEN re.4c between 2 AND 4 THEN 2
-          WHEN re.4c between 5 AND 8 THEN 3
-          WHEN re.4c >= 9 THEN 4
+          WHEN re.4c between 2 AND 6 THEN 2
+          WHEN re.4c between 7 AND 14 THEN 3
+          WHEN re.4c >= 14 THEN 4
       END
     '''
     case_column = f'''
       CASE
           WHEN 4c = 1 THEN 1 
-          WHEN 4c between 2 AND 4 THEN 2
-          WHEN 4c between 5 AND 8 THEN 3
-          WHEN 4c >= 9 THEN 4
+          WHEN 4c between 2 AND 6 THEN 2
+          WHEN 4c between 7 AND 14 THEN 3
+          WHEN 4c >= 14 THEN 4
       END
     '''
     case_column_ja = f'''
@@ -307,6 +337,55 @@ class Analysis():
         'df': df.drop(self.drop_col, axis=1)
       }
 
+  def horse_age(self) -> dict: # 人気順別成績
+    column = 'horse_age'
+    column_ja = '馬齢'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+    
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('barei'),
+        'data': {
+          'table_header': self.__create_column_ording(column_ja),
+          'data': data,
+        },
+        'memo': '馬齢別成績',
+        'df': df.drop(self.drop_col, axis=1)
+      }
+
+  def jokey_weight(self) -> dict: # 人気順別成績
+    column = 'jokey_weight'
+    column_ja = '斤量'
+    case_re_column = f'''re.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+    
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('kinryo'),
+        'data': {
+          'table_header': self.__create_column_ording(column_ja),
+          'data': data,
+        },
+        'memo': '斤量別成績',
+        'df': df.drop(self.drop_col, axis=1)
+      }
   def seconds_3f(self) -> dict: # 上がり3F
     column = 'seconds_3f'
     column_ja = '3Fタイム'
@@ -372,7 +451,7 @@ class Analysis():
         'df': df.drop(self.drop_col, axis=1)
       }
 
-  def seconds_3f_rank(self) -> dict: # 人気順別成績
+  def seconds_3f_rank(self) -> dict: # 3F速さ順位別成績
     column = 'seconds_3f'
     column_ja = '3F速さ順位'
     case_re_column = f'''re.{column}'''
@@ -383,7 +462,6 @@ class Analysis():
       stmt: str = Query.base_stmt_rank(
         column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
       )
-      print(stmt)
       cursor.execute(stmt)
       data: List[dict] = cursor.fetchall()
       data = self.processingData(data)
@@ -397,6 +475,33 @@ class Analysis():
         'memo': '3F速さ順位',
         'df': df.drop(self.drop_col, axis=1)
       }
+  
+  def jockey(self) -> dict: # 騎手
+    column = 'name'
+    column_ja = '騎手'
+    case_re_column = f'''j.{column}'''
+    case_column = case_re_column
+    case_column_ja = f'''rate_tmp.{column}'''
+    
+    with self.pool.cursor() as cursor:
+      stmt: str = Query.base_join_horse_jokey_stmt(
+        column, case_column, case_re_column, column_ja, case_column_ja, self.__create_where()
+      )
+      print(stmt)
+      cursor.execute(stmt)
+      data: List[dict] = cursor.fetchall()
+      data = self.processingData(data)
+      df = pd.read_sql(stmt, self.pandas_pool)
+      return {
+        'course_analysis_id': self.__get_analysis_key('jockey'),
+        'data': {
+          'table_header': self.__create_column_ording('騎手'),
+          'data': data,
+        },
+        'memo': '騎手別',
+        'df': df.drop(self.drop_col2, axis=1)
+      }
+
   def processingData(self, data) -> List[List]: # クエリの結果を加工
     data = [self.__proccessing_dict_value(d) for d in data]
     data = [self.__rank_coloring(d) for d in data]
@@ -464,6 +569,8 @@ class Analysis():
     data = target_column_rank(data, 'fukusho_rate_ranking', '複勝率')
     data = target_column_rank(data, 'win_recovery_100_over', '単回値')
     data = target_column_rank(data, 'd_win_recovery_100_over', '複回値')
+    if ('total_count' in data):
+      data = target_column_rank(data, 'total_count', '')
     return data
   
   def __create_column_ording(self, column_ja: str) -> str: # 表のカラムの表示順を管理
